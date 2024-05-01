@@ -2,5 +2,6 @@ export default interface IResponse{
     ok: boolean,
     message:string,
     response: any,
-    code: number
+    code: number,
+    token?: string
   }

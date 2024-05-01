@@ -3,3 +3,4 @@ config/default.yaml
 package-lock.json
 .vscode
 build/
+/src/uploads/game/*

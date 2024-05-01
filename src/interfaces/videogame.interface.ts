@@ -1,9 +1,9 @@
 export default interface IVideogame{
-
-    gameID: number
+    _id?:string
     gameName: string
     console: string
     format: string
     classification: string
     quantity: number
+    image: string
 }

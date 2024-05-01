@@ -1,30 +1,53 @@
 import logger from "../../lib/logger";
 import MongoConn from "../../lib/mongodb";
 import IResponse from "../interfaces/response.interface";
+import IUser from "../interfaces/user.interface";
 import IVideogame from "../interfaces/videogame.interface";
+import User from "../models/user.model";
 import Stock from "../models/videogame.model";
+import ImageUtil from "../utils/image.util";
+import path from "path";
 
 export default class GameControl{
 
-    private mongoConn: MongoConn
+    private mongoConn: MongoConn;
+    private imageUtil: ImageUtil;
 
     constructor(){
-        this.mongoConn = new MongoConn()
+        this.mongoConn = new MongoConn();
+        this.imageUtil = new ImageUtil();
     }
 
-    async createGameStock(game:IVideogame):Promise<IResponse>{
+    async createGameStock(game:IVideogame , id:string, file:any):Promise<IResponse>{
        try{
         await this.mongoConn.connectDB()
-        if(game){
-            const inStock = await Stock.findOne({gameID: game.gameID})
-            if(!inStock){
-                const gameCreateinStock = await Stock.create(game)
-                return({ok: true, message: "Videojuego Creado Existosamente", response: gameCreateinStock, code: 201})
-            }else{
-                return({ok: true, message: "Videojuego ya existe", response: inStock, code: 404})
-            }
+        if(!file){
+            return({ok: true, message: "No files upload", response: null, code: 201})
         }
-        return({ok: false, message: "Parametros Incorrectos", response: null, code: 400})
+        const userFind = await User.findById(id) as any
+
+        if(userFind.rol === "ROLE_ADMIN"){
+            const { image } = file
+            const validationImage = await this.imageUtil.validFormat(image)
+            if(validationImage){
+                if(game){
+                    const inStock = await Stock.findOne({gameName: game.gameName})
+                    if(!inStock){
+                        game.image = await this.imageUtil.newName(image)
+                        await this.imageUtil.uploadImage(image, game.image)
+                        const gameCreateinStock = await Stock.create(game)
+                        return({ok: true, message: "Videojuego Creado Existosamente", response: gameCreateinStock, code: 201})
+                    }else{
+                        return({ok: true, message: "Videojuego ya existe", response: inStock, code: 409})
+                    }
+                }
+                return({ok: false, message: "Parametros Incorrectos", response: null, code: 400})
+            }else{
+                return({ok: false, message: "Sube una imagen correctamente", response: null, code: 400})
+            }
+        }else{
+            return({ok: false, message: "Forbidden", response: null, code: 403})
+        }
        }catch(error: any){
         logger.error('[GameControl/createGameStock]')
         return({ok: false, message: "Ocurrio un Error", response: null, code: 500})
@@ -32,10 +55,10 @@ export default class GameControl{
         await this.mongoConn.disconnectDB()
        } 
     }
-    async getGameStock(game:IVideogame):Promise<IResponse>{
+    async getGameStock(id:string):Promise<IResponse>{
         try{
             await this.mongoConn.connectDB()
-            const gameStock = await Stock.findOne({gameID: game.gameID})
+            const gameStock = await Stock.findById(id)                                                                                                           
             if(!gameStock){
                 return({ok: true, message: "No hay Videojuegos", response: null, code: 404})
             }
@@ -48,32 +71,29 @@ export default class GameControl{
         }
     }
 
-    async putGameStock(game:IVideogame):Promise<IResponse>{
+    async putGameStock(game:IVideogame,idGame:string, idUser:string, file:any):Promise<IResponse>{
         try{
             await this.mongoConn.connectDB()
-            const existId = await Stock.findOne({gameID: game.gameID}).select('-_id, -__v')
-            console.log(existId)
-            console.log(game)
-            if(!existId){
-                return({ok: false, message: "No existe el Videojuego", response: existId, code: 404})
+            const userFind = await User.findById(idUser) as any
+            if(userFind.rol === "ROLE_ADMIN"){
+                const existId = await Stock.findById(idGame) as any            
+                if(!existId){
+                    return({ok: false, message: "No existe el Videojuego", response: null, code: 404})
+                }
+                if(file){
+                  const { image } = file
+                  if(await this.imageUtil.validFormat(image)){
+                    game.image = await this.imageUtil.newName(image)
+                    await this.imageUtil.uploadImage(image, game.image)
+                    await this.imageUtil.deleteImage(existId.image)
+                  }
+                }
+                const gameUpdate = await Stock.findByIdAndUpdate(idGame, game) 
+                return({ok: true, message: "Juego actualizado", response: gameUpdate, code: 403})
+            }else{
+                return({ok: true, message: "Forbidden", response: null, code: 403})
             }
-            const output = await Stock.updateOne({gameID: game.gameID},
-                {
-                    $set:{
-                        gameName: game.gameName,
-                        console: game.console,
-                        format: game.format,
-                        classification: game.classification,
-                        quantity: game.quantity
-                    }
-                })
-            const existGame = await Stock.findOne({gameID: game.gameID}).select('-_id, -__v')
-            const response = {
-                gamebefore: existId,
-                gameUpdate: existGame, 
-                output: output
-            } 
-            return({ok: true, message: "Videojuego Actualizado", response: response, code: 200})
+            
         }catch(error: any){
             logger.error('[GameControl/putGameStock]')
             return({ok: false, message: "Ocurrio un Error", response: error, code: 500})
@@ -82,24 +102,54 @@ export default class GameControl{
         }
     }
 
-    async deleteGameStock(game:any):Promise<IResponse>{
+    async deleteGameStock(idUser:string, idGame:string):Promise<IResponse>{
         try{
             await this.mongoConn.connectDB()
-            if(game){
-                const gameExist = await Stock.findOne({gameID: game.gameID})
-                if(gameExist){
-                    const gameDelete = await Stock.deleteOne({gameID: game.gameID})
-                    return({ok: true, message: "Videojuego Eliminado Exitosamente", response: gameDelete, code: 200})
+            const findUser:IUser = await User.findById(idUser) as any
+            if(findUser.rol === "ROLE_ADMIN"){
+                const findStokGame  = await Stock.findById(idGame) as any
+                if(!findStokGame){
+                    return({ok: false, message: "No existe el Videojuego", response: null, code: 404})
                 }else{
-                    return({ ok: false, message: "Ya a sido Eliminado o No existe", response: null, code: 301})
+                    await this.imageUtil.deleteImage(findStokGame.image)
+                    const stockDelete = await Stock.findByIdAndDelete(findStokGame._id)
+                    return({ok: false, message: "Stock eliminado", response: stockDelete, code: 200})
                 }
+            }else{
+                return({ok: false, message: "Forbidden", response: null, code: 200})
             }
-            return({ok: false, message: "Parametros Incorrectos", response: null, code: 400})
         }catch(error: any){
-            logger.error('[GameControl/createGameStock]')
+            logger.error('[GameControl/deleteGameStock]')
             return({ok: false, message: "Ocurrio un Error", response: null, code: 500})
         }finally{
             await this.mongoConn.disconnectDB()
+        }
+    }
+
+    async getAllGames():Promise<IResponse>{
+       try {
+        await this.mongoConn.connectDB()
+         const gameResponse = await Stock.find()
+         if(!gameResponse){
+            return({ok: false, message: "No hay registro", response: null, code: 404})
+         }
+         return({ok: true, message: "Game finds", response: gameResponse, code: 200})
+       } catch (error) {
+        logger.error('[GameControl/getAllGames]')
+        return({ok: false, message: "Ocurrio un Error", response: null, code: 500})
+       }finally{
+        await this.mongoConn.disconnectDB()
+       }
+       
+    }
+
+    async getImageVideoGame(image:string):Promise<any>{
+        try {
+            const dirImage = path.join(__dirname, `../uploads/game/${image}`);  
+            return dirImage;          
+        } catch (error) {
+            logger.error('[GameControl/uploadFile]')
+        return({ok: false, message: "Ocurrio un Error", response: null, code: 500})
         }
     }
 }
